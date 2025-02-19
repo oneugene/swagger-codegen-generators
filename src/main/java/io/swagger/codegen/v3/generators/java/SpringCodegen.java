@@ -59,16 +59,24 @@ public class SpringCodegen extends AbstractJavaCodegen implements BeanValidation
     public static final String USE_TAGS = "useTags";
     public static final String SPRING_MVC_LIBRARY = "spring-mvc";
     public static final String SPRING_CLOUD_LIBRARY = "spring-cloud";
+    public static final String SPRING_BOOT_3_LIBRARY = "spring-boot3";
     public static final String IMPLICIT_HEADERS = "implicitHeaders";
     public static final String SWAGGER_DOCKET_CONFIG = "swaggerDocketConfig";
     public static final String TARGET_OPENFEIGN = "generateForOpenFeign";
     public static final String DEFAULT_INTERFACES = "defaultInterfaces";
     public static final String SPRING_BOOT_VERSION = "springBootVersion";
+    public static final String SPRING_BOOT3_VERSION = "springBoot3Version";
+    public static final String SPRING_BOOT3_JAVA_VERSION = "springBoot3JavaVersion";
     public static final String SPRING_BOOT_VERSION_2 = "springBootV2";
     public static final String DATE_PATTERN = "datePattern";
     public static final String DATE_TIME_PATTERN = "dateTimePattern";
-
     public static final String THROWS_EXCEPTION = "throwsException";
+
+    public static final String VALIDATION_MODE_OPTION = "validationMode";
+    public static final String VALIDATION_MODE_LEGACY = "legacy";
+    public static final String VALIDATION_MODE_LEGACY_NULLABLE = "legacyNullable";
+    public static final String VALIDATION_MODE_STRICT = "strict";
+    public static final String VALIDATION_MODE_LOOSE = "loose";
 
     protected String title = "swagger-petstore";
     protected String configPackage = "io.swagger.configuration";
@@ -89,8 +97,11 @@ public class SpringCodegen extends AbstractJavaCodegen implements BeanValidation
     protected boolean openFeign = false;
     protected boolean defaultInterfaces = true;
     protected String springBootVersion = "2.1.16.RELEASE";
+    protected String springBoot3Version = "3.4.2";
+    protected String springBoot3JavaVersion = "21";
     protected boolean throwsException = false;
     private boolean notNullJacksonAnnotation = false;
+    protected String validationMode = "strict";
 
     public SpringCodegen() {
         super();
@@ -127,6 +138,7 @@ public class SpringCodegen extends AbstractJavaCodegen implements BeanValidation
         cliOptions.add(CliOption.newBoolean(DATE_TIME_PATTERN, "use pattern for date time parameters").defaultValue("true"));
 
         supportedLibraries.put(DEFAULT_LIBRARY, "Spring-boot Server application using the SpringFox integration.");
+        supportedLibraries.put(SPRING_BOOT_3_LIBRARY, "Spring-boot v3 Server application.");
         supportedLibraries.put(SPRING_MVC_LIBRARY, "Spring-MVC Server application using the SpringFox integration.");
         supportedLibraries.put(SPRING_CLOUD_LIBRARY, "Spring-Cloud-Feign client with Spring-Boot auto-configured settings.");
         setLibrary(DEFAULT_LIBRARY);
@@ -144,6 +156,29 @@ public class SpringCodegen extends AbstractJavaCodegen implements BeanValidation
         springBootVersionOption.setEnum(springBootEnum);
         cliOptions.add(springBootVersionOption);
 
+        CliOption springBoot3VersionOption = new CliOption(SPRING_BOOT3_VERSION, "Spring boot 3 version");
+        Map<String, String> springBoot3Enum = new HashMap<>();
+        springBoot3Enum.put("3.3.4", "3.3.4");
+        springBoot3Enum.put("3.4.2", "3.4.2");
+        springBoot3VersionOption.setEnum(springBoot3Enum);
+        cliOptions.add(springBoot3VersionOption);
+
+        CliOption springBoot3JavaVersionOption = new CliOption(SPRING_BOOT3_JAVA_VERSION, "Spring boot 3 Java version");
+        Map<String, String> springBoot3JavaEnum = new HashMap<>();
+        springBoot3JavaEnum.put("17", "17");
+        springBoot3JavaEnum.put("21", "21");
+        springBoot3JavaVersionOption.setEnum(springBoot3JavaEnum);
+        cliOptions.add(springBoot3JavaVersionOption);
+
+        CliOption validationMode = new CliOption(VALIDATION_MODE_OPTION, "Validation mode to apply");
+        validationMode.setDefault(VALIDATION_MODE_STRICT);
+        Map<String, String> validationModeOptions = new HashMap<String, String>();
+        validationModeOptions.put(VALIDATION_MODE_STRICT, "Use Helper JsonNullable/NotUndefined on required+nullable fields, @NotNull on required, jackson validation on default");
+        validationModeOptions.put(VALIDATION_MODE_LOOSE, "Use Helper JsonNullable/NotUndefined on required+nullable fields, @NotNull on required, no validation on default");
+        validationModeOptions.put(VALIDATION_MODE_LEGACY, "Apply @NotNull on required fields");
+        validationModeOptions.put(VALIDATION_MODE_LEGACY_NULLABLE, "Apply @NotNull when nullable is not defined or false, if useNullableForNotNull=false Apply @NotNull on required fields");
+        validationMode.setEnum(validationModeOptions);
+        cliOptions.add(validationMode);
     }
 
     @Override
@@ -214,6 +249,12 @@ public class SpringCodegen extends AbstractJavaCodegen implements BeanValidation
             LOGGER.info("Set base package to invoker package (" + basePackage + ")");
         }
 
+        if (isSpringBoot3Library()) {
+            setDateLibrary("java8");
+            setJakarta(true);
+            additionalProperties.put(JAKARTA, jakarta);
+        }
+
         super.processOpts();
 
         // clear model and api doc template as this codegen
@@ -225,6 +266,11 @@ public class SpringCodegen extends AbstractJavaCodegen implements BeanValidation
         if (additionalProperties.containsKey(TITLE)) {
             this.setTitle((String) additionalProperties.get(TITLE));
         }
+
+        if (additionalProperties.containsKey(VALIDATION_MODE_OPTION)) {
+            this.setValidationMode((String) additionalProperties.get(VALIDATION_MODE_OPTION));
+        }
+        additionalProperties.put("is" + validationMode.substring(0, 1).toUpperCase() + validationMode.substring(1) + "Validation", true);
 
         if (additionalProperties.containsKey(CONFIG_PACKAGE)) {
             this.setConfigPackage((String) additionalProperties.get(CONFIG_PACKAGE));
@@ -265,6 +311,7 @@ public class SpringCodegen extends AbstractJavaCodegen implements BeanValidation
 
         if (additionalProperties.containsKey(USE_BEANVALIDATION)) {
             this.setUseBeanValidation(convertPropertyToBoolean(USE_BEANVALIDATION));
+            writePropertyBack(USE_BEANVALIDATION, this.useBeanValidation);
         }
 
         if (additionalProperties.containsKey(USE_OPTIONAL)) {
@@ -289,8 +336,24 @@ public class SpringCodegen extends AbstractJavaCodegen implements BeanValidation
             this.setOpenFeign(true);
         }
 
+        if (additionalProperties.containsKey(SPRING_BOOT3_VERSION)) {
+            this.springBoot3Version = additionalProperties.get(SPRING_BOOT3_VERSION).toString();
+        }
+        additionalProperties.put(SPRING_BOOT3_VERSION, this.springBoot3Version);
+
+        if (additionalProperties.containsKey(SPRING_BOOT3_JAVA_VERSION)) {
+            this.springBoot3JavaVersion = additionalProperties.get(SPRING_BOOT3_JAVA_VERSION).toString();
+        }
+        additionalProperties.put(SPRING_BOOT3_JAVA_VERSION, this.springBoot3JavaVersion);
+
         if (useBeanValidation) {
             writePropertyBack(USE_BEANVALIDATION, useBeanValidation);
+            if (VALIDATION_MODE_LOOSE.equals(validationMode) || VALIDATION_MODE_STRICT.equals(validationMode)) {
+                writeOptional(outputFolder, new SupportingFile("NotUndefined.mustache",
+                    (sourceFolder + File.separator + configPackage).replace(".", java.io.File.separator), "NotUndefined.java"), true);
+                writeOptional(outputFolder, new SupportingFile("NotUndefinedValidator.mustache",
+                    (sourceFolder + File.separator + configPackage).replace(".", java.io.File.separator), "NotUndefinedValidator.java"), true);
+            }
         }
 
         if (additionalProperties.containsKey(IMPLICIT_HEADERS)) {
@@ -324,7 +387,16 @@ public class SpringCodegen extends AbstractJavaCodegen implements BeanValidation
         supportingFiles.add(new SupportingFile("README.mustache", "", "README.md"));
 
         if (!this.interfaceOnly) {
-
+            if (isSpringBoot3Library()) {
+                useOas2 = false;
+                additionalProperties.remove("threetenbp");
+                additionalProperties.put(JAKARTA, jakarta = true);
+                apiTestTemplateFiles.clear();
+                supportingFiles.add(new SupportingFile("homeController.mustache", (sourceFolder + File.separator + configPackage).replace(".", java.io.File.separator), "HomeController.java"));
+                supportingFiles.add(new SupportingFile("openAPISpringBoot.mustache", (sourceFolder + File.separator + basePackage).replace(".", java.io.File.separator), "OpenAPISpringBoot.java"));
+                supportingFiles.add(new SupportingFile("swaggerUiConfiguration.mustache", (sourceFolder + File.separator + configPackage).replace(".", java.io.File.separator), "SwaggerUiConfiguration.java"));
+                supportingFiles.add(new SupportingFile("application.mustache", ("src.main.resources").replace(".", java.io.File.separator), "application.properties"));
+            }
             if (isDefaultLibrary()) {
                 apiTestTemplateFiles.clear();
                 supportingFiles.add(new SupportingFile("homeController.mustache",
@@ -385,14 +457,16 @@ public class SpringCodegen extends AbstractJavaCodegen implements BeanValidation
                         (sourceFolder + File.separator + apiPackage).replace(".", java.io.File.separator), "NotFoundException.java"));
                 supportingFiles.add(new SupportingFile("apiOriginFilter.mustache",
                         (sourceFolder + File.separator + apiPackage).replace(".", java.io.File.separator), "ApiOriginFilter.java"));
-                supportingFiles.add(new SupportingFile("swaggerDocumentationConfig.mustache",
+                if (!isSpringBoot3Library()) {
+                    supportingFiles.add(new SupportingFile("swaggerDocumentationConfig.mustache",
                         (sourceFolder + File.separator + configPackage).replace(".", java.io.File.separator), "SwaggerDocumentationConfig.java"));
+                }
                 supportingFiles.add(new SupportingFile("LocalDateConverter.mustache",
                     (sourceFolder + File.separator + configPackage).replace(".", java.io.File.separator), "LocalDateConverter.java"));
                 supportingFiles.add(new SupportingFile("LocalDateTimeConverter.mustache",
                     (sourceFolder + File.separator + configPackage).replace(".", java.io.File.separator), "LocalDateTimeConverter.java"));
             }
-        } else if ( this.swaggerDocketConfig && !isSpringCloudLibrary()) {
+        } else if ( this.swaggerDocketConfig && !isSpringCloudLibrary() && !isSpringBoot3Library()) {
             supportingFiles.add(new SupportingFile("swaggerDocumentationConfig.mustache",
                     (sourceFolder + File.separator + configPackage).replace(".", java.io.File.separator), "SwaggerDocumentationConfig.java"));
         }
@@ -757,6 +831,9 @@ public class SpringCodegen extends AbstractJavaCodegen implements BeanValidation
     private boolean isDefaultLibrary() {
         return library.equals(DEFAULT_LIBRARY);
     }
+    private boolean isSpringBoot3Library() {
+        return library.equals(SPRING_BOOT_3_LIBRARY);
+    }
 
     @Override
     public Map<String, Object> postProcessSupportingFileData(Map<String, Object> objs) {
@@ -823,6 +900,10 @@ public class SpringCodegen extends AbstractJavaCodegen implements BeanValidation
 
     public void setConfigPackage(String configPackage) {
         this.configPackage = configPackage;
+    }
+
+    public void setValidationMode(String validationMode) {
+        this.validationMode = validationMode;
     }
 
     public void setBasePackage(String configPackage) {
